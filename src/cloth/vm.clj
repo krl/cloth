@@ -21,12 +21,20 @@ to be aware of surrounding contracts and returns the environment untouched"
         topop (vec (next args))
         count (count topop)]
     `(do (swap! *instructions*
-            assoc ~name
-            (fn ~(conj [env '_#] (first args))
-              (let [[~(first args) ~topop] (stack-pop ~(first args) ~count)]
-                [~env
-                 (inc-pointer (do ~@body) 1)])))
+                assoc ~name
+                (fn ~(conj [env] (first args))
+                  (let [[~(first args) ~topop] (stack-pop ~(first args) ~count)]
+                    [~env
+                     (inc-pointer (do ~@body) 1)])))
          ~name)))
+
+(defn storage-get [env state addr]
+  (println "storage-get")
+  (println env)
+  (or (get-in env [(:context state) :storage addr]) 0))
+
+(defn storage-put [env state addr value]
+  (assoc-in env [(:context state) :storage addr] value))
 
 (defn instruction-at
   ([state] (instruction-at state 0))
@@ -72,7 +80,7 @@ to be aware of surrounding contracts and returns the environment untouched"
             bytes)))
 
 (doseq [i (range 1 33)] ;; PUSH1 - PUSH32
-  (def-special-instruction (keyword (str "PUSH" i)) [env to state]
+  (def-special-instruction (keyword (str "PUSH" i)) [env state]
     [env 
      (-> state
          (inc-pointer (inc i))
@@ -81,7 +89,7 @@ to be aware of surrounding contracts and returns the environment untouched"
                               (inc (:pointer state))
                               (+ (:pointer state) i 1)))))]))
 
-(def-special-instruction :GAS [env to state]
+(def-special-instruction :GAS [env state]
   (-> state
       (inc-pointer 1)
       (stack-push 100000)))
@@ -98,7 +106,11 @@ to be aware of surrounding contracts and returns the environment untouched"
 (definstruction :STOP [state]
   (assoc state :terminated true))
 
-(def-special-instruction :CALL [env to state])
+;; (def-special-instruction :CALL [env state]
+;;   (let [[state [gas addr value in-off in-size out-off out-size]] 
+;;         (stack-pop state 7)]
+;;     [env
+;;      (inc-pointer state 1)]))
 
 (definstruction :CALLER [state]
   (stack-push state :TESTCALLER))
@@ -110,18 +122,17 @@ to be aware of surrounding contracts and returns the environment untouched"
   (assoc-in state [:mem addr] 
             (subvec (:code state) offset (+ offset size))))
 
-(def-special-instruction :SSTORE [env to state]
+(def-special-instruction :SSTORE [env state]
   (let [[state [addr value]] (stack-pop state 2)]
-    [(assoc-in env [:contracts to :storage addr] value)
+    [(storage-put env state addr value)
      (inc-pointer state 1)]))
 
-(def-special-instruction :SLOAD [env to state]
+(def-special-instruction :SLOAD [env state]
   [env
    (let [[state [addr]] (stack-pop state 1)]
     (-> state
         (inc-pointer 1)
-        (stack-push (or (get-in env [:contracts to :storage addr])
-                        0))))])
+        (stack-push (storage-get env state addr))))])
 
 (definstruction :MSTORE [state addr value]
   (assoc-in state [:mem addr] value))
@@ -130,7 +141,7 @@ to be aware of surrounding contracts and returns the environment untouched"
   (stack-push state (or (get-in state [:mem addr])
                         0)))
    
-(defn step [env to state]
+(defn step [env state]
   (let [instruction (get @*instructions* (instruction-at state))]
     (cond (nil? instruction)
           [env (assoc state :terminated true)]
@@ -138,21 +149,24 @@ to be aware of surrounding contracts and returns the environment untouched"
           (nil? instruction)
           (throw (Exception. (str "Unknown instruction " instruction)))
 
-          :else (instruction env to state))))
+          :else (instruction env state))))
 
-(defn run [env to state]
+(defn run [env state]
   (println "execution state")
   (pp/pprint (-> state
                  (assoc :instruction (instruction-at state))
                  (dissoc :code)))
-  (let [[env state] (step env to state)]
+  (println env)
+  (pp/pprint env)
+  (let [[env state] (step env state)]
     (if (:terminated state)
       [env state]
-      (recur env to state))))
+      (recur env state))))
 
-(defn init-state [code & args]
+(defn init-state [context code & args]
   {:args    (vec args)
-   :pointer 0
    :code    code
+   :pointer 0
+   :context context
    :mem     {}
    :stack   (list)})

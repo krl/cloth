@@ -2,15 +2,17 @@
   (:require [clojure.test :refer :all]
             [cloth.compile :as c]
             [cloth.vm :as vm]
+            [cloth.env :as e]
             [cloth.env :refer :all]))
 
-;; (testing "contracts calling contracts"
-;;   (let [[addr env] 
-;;         (create-contract
-;;          {} (c/compile-lll-string "(return 0 (lll (return (+ $0 1)) 0))"))
+(testing "contracts calling contracts"
+  (let [[env addr]
+        (e/contract-helper "(return (+ $0 1))")
           
-;;         [addr2 env]
-;;         (create-contract {}
-;;                          (c/compile-lll-string
-;;                           (str "(call (- (gas) 100) " addr " 0 0 7 0 0)")))]
-;;     env)
+        [env addr2]
+        (e/contract-helper env
+                         (str "(return (call 1337 " addr " 0 0 7 0 0))"))
+
+        [env return] 
+        (transaction env addr2)]
+    return))
