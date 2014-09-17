@@ -29,8 +29,6 @@ to be aware of surrounding contracts and returns the environment untouched"
          ~name)))
 
 (defn storage-get [env state addr]
-  (println "storage-get")
-  (println env)
   (or (get-in env [(:context state) :storage addr]) 0))
 
 (defn storage-put [env state addr value]
@@ -57,20 +55,33 @@ to be aware of surrounding contracts and returns the environment untouched"
         remain (nthnext (:stack state) num)]
     [(assoc state :stack remain) popped]))
 
-;; arithmetic
+(defn step [env state]
+  (let [instruction (get @*instructions* (instruction-at state))]
+    (cond (nil? instruction)
+          [env (assoc state :terminated true)]
 
-(definstruction :ADD [state a b]
-  (stack-push state (+ a b)))
+          (nil? instruction)
+          (throw (Exception. (str "Unknown instruction " instruction)))
 
-(definstruction :SUB [state a b]
-  (stack-push state (- a b)))
+          :else (instruction env state))))
 
-(definstruction :MUL [state a b]
-  (stack-push state (* a b)))
+(defn run [env state]
+  (println "execution state")
+  (pp/pprint (-> state
+                 (assoc :instruction (instruction-at state))
+                 (dissoc :code)))
+  (let [[env state] (step env state)]
+    (if (:terminated state)
+      [env state]
+      (recur env state))))
 
-(definstruction :DIV [state a b]
-  (stack-push state (/ a b)))
-
+(defn init-state [context code & args]
+  {:args    (vec args)
+   :code    code
+   :pointer 0
+   :context context
+   :mem     {}
+   :stack   (list)})
 
 (defn bytes-to-int [bytes]
   (if (= (count bytes) 1)
@@ -89,10 +100,59 @@ to be aware of surrounding contracts and returns the environment untouched"
                               (inc (:pointer state))
                               (+ (:pointer state) i 1)))))]))
 
-(def-special-instruction :GAS [env state]
-  (-> state
-      (inc-pointer 1)
-      (stack-push 100000)))
+;; arithmetic
+
+(definstruction :ADD [state a b]
+  (stack-push state (+ a b)))
+
+(definstruction :SUB [state a b]
+  (stack-push state (- a b)))
+
+(definstruction :MUL [state a b]
+  (stack-push state (* a b)))
+
+(definstruction :DIV [state a b]
+  (stack-push state (/ a b)))
+
+;; logic
+
+(definstruction :NOT [state in]
+  (if (= in 0) 1 0))
+
+(definstruction :LT [state a b]
+  (stack-push state
+              (if (< a b) 1 0)))
+
+(definstruction :SLT [state a b]
+  (stack-push state
+              (if (< a b) 1 0)))
+
+(definstruction :GT [state a b]
+  (stack-push state
+              (if (> a b) 1 0)))
+
+(definstruction :SGT [state a b]
+  (stack-push state
+              (if (> a b) 1 0)))
+
+(definstruction :EQ [state a b]
+  (stack-push state
+              (if (= a b) 1 0)))
+
+(definstruction :NOT [state val]
+  (stack-push state
+              (if (zero? val) 1 0)))                
+
+;; stuff
+
+(definstruction :GAS [state]
+  ;; dummy for now
+  (stack-push state 100000));
+
+(definstruction :ADDRESS [state]
+  (stack-push state (:context state)))
+
+;; storage
 
 (definstruction :MSTORE [state addr value]
   (assoc-in state [:mem addr] value))
@@ -106,14 +166,37 @@ to be aware of surrounding contracts and returns the environment untouched"
 (definstruction :STOP [state]
   (assoc state :terminated true))
 
-;; (def-special-instruction :CALL [env state]
-;;   (let [[state [gas addr value in-off in-size out-off out-size]] 
-;;         (stack-pop state 7)]
-;;     [env
-;;      (inc-pointer state 1)]))
+(def-special-instruction :JUMP [env state]
+  (let [[state [addr]] (stack-pop state 1)]    
+    [env
+     (assoc state :pointer addr)]))
+
+(def-special-instruction :JUMPI [env state]
+  (let [[state [addr value]] (stack-pop state 2)]
+    [env
+     (if-not (zero? value)
+       (assoc state :pointer addr)
+       (inc-pointer state 1))]))
+
+(def-special-instruction :CALL [env state]
+  (println "GOTHERE MFCRS")
+  (let [[state [gas addr value in-off in-size out-off out-size]] 
+        (stack-pop state 7)
+        
+        [env callstate]
+        (run env 
+             (init-state addr
+                         (get-in env [addr :code])
+                         (get-in state [:mem in-off])))
+        return (get-return-value callstate)]
+    (println "subcall returned: " return)
+    [env
+     (-> state
+         (assoc-in [:mem out-off] return)
+         (inc-pointer 1))]))
 
 (definstruction :CALLER [state]
-  (stack-push state :TESTCALLER))
+  (stack-push (:context state)))
 
 (definstruction :DUP [state value]
   (stack-push state value))
@@ -140,33 +223,5 @@ to be aware of surrounding contracts and returns the environment untouched"
 (definstruction :MLOAD [state addr]
   (stack-push state (or (get-in state [:mem addr])
                         0)))
-   
-(defn step [env state]
-  (let [instruction (get @*instructions* (instruction-at state))]
-    (cond (nil? instruction)
-          [env (assoc state :terminated true)]
 
-          (nil? instruction)
-          (throw (Exception. (str "Unknown instruction " instruction)))
 
-          :else (instruction env state))))
-
-(defn run [env state]
-  (println "execution state")
-  (pp/pprint (-> state
-                 (assoc :instruction (instruction-at state))
-                 (dissoc :code)))
-  (println env)
-  (pp/pprint env)
-  (let [[env state] (step env state)]
-    (if (:terminated state)
-      [env state]
-      (recur env state))))
-
-(defn init-state [context code & args]
-  {:args    (vec args)
-   :code    code
-   :pointer 0
-   :context context
-   :mem     {}
-   :stack   (list)})

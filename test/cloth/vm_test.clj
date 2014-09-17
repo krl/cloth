@@ -35,6 +35,32 @@
           [env return]  (e/transaction env address 20)]
       (is (= return 4)))))
 
+(deftest logic
+  (testing "greater"
+    (let [[env address] (e/contract-helper "(return (> $0 2))")
+          [env return1] (e/transaction env address 1)
+          [env return2] (e/transaction env address 2)
+          [env return3] (e/transaction env address 3)]
+      (is (= return1 0))
+      (is (= return2 0))
+      (is (= return3 1))))
+  (testing "lesser"
+    (let [[env address] (e/contract-helper "(return (< $0 2))")
+          [env return1] (e/transaction env address 1)
+          [env return2] (e/transaction env address 2)
+          [env return3] (e/transaction env address 3)]
+      (is (= return1 1))
+      (is (= return2 0))
+      (is (= return3 0))))
+  (testing "equal"
+    (let [[env address] (e/contract-helper "(return (= $0 2))")
+          [env return1] (e/transaction env address 1)
+          [env return2] (e/transaction env address 2)
+          [env return3] (e/transaction env address 3)]
+      (is (= return1 0))
+      (is (= return2 1))
+      (is (= return3 0)))))
+
 (deftest sstore-sload
   (testing "sstore in init code"
     (let [[env address] (e/contract-helper-full 

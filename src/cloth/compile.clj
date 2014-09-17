@@ -28,12 +28,8 @@
   (hex-to-instructions
    (:out (sh "lllc" :in string))))
 
+(compile-lll-string "(return 888)")
+
 (defn compile-serpent-string [string]
   (hex-to-instructions
-   (:out (sh "serpent" "compile" string))))
-
-(compile-serpent-string 
-"
-code: 
-  x = 1
-")
+   (:out (sh "sc" "compile" string))))
